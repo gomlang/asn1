@@ -1,0 +1,177 @@
+package asn1;
+
+use std::utf8;
+
+pub struct Tlv {
+    pub tag: u8,
+    pub content: Vec[u8],
+}
+
+impl Reader {
+    fn tlv(self: Reader, end: isize) -> Result[Tlv, Error] {
+        let offset = self.cursor.get();
+        let tag = self.byte(end)?;
+        if tag == 0 || tag % 32 == 31 {
+            return Result::Err(error(ErrorKind::InvalidTag, offset, "unsupported DER tag form"))
+        }
+        let length = self.length(end)?;
+        let content = self.take(length, end)?.to_vec();
+        Result::Ok(Tlv { tag, content })
+    }
+}
+
+pub fn parse_tlv(input: Slice[u8], limits: Limits) -> Result[Tlv, Error] {
+    limits.validate()?;
+    if input.len() > limits.max_bytes {
+        return Result::Err(error(ErrorKind::Limit, 0, "DER input exceeds byte limit"))
+    }
+    let reader = Reader { input, cursor: Ref::new(0), elements: Ref::new(0), limits };
+    let value = reader.tlv(input.len())?;
+    if reader.cursor.get() != input.len() {
+        return Result::Err(error(ErrorKind::TrailingData, reader.cursor.get(), "trailing DER data"))
+    }
+    Result::Ok(value)
+}
+
+pub fn split_tlvs(input: Slice[u8], limits: Limits) -> Result[Vec[Tlv], Error] {
+    limits.validate()?;
+    if input.len() > limits.max_bytes {
+        return Result::Err(error(ErrorKind::Limit, 0, "DER input exceeds byte limit"))
+    }
+    let reader = Reader { input, cursor: Ref::new(0), elements: Ref::new(0), limits };
+    let values: Vec[Tlv] = Vec::new();
+    while reader.cursor.get() < input.len() {
+        if values.len() >= limits.max_elements {
+            return Result::Err(
+                error(ErrorKind::Limit, reader.cursor.get(), "DER element limit exceeded"),
+            )
+        }
+        values.push(reader.tlv(input.len())?);
+    }
+    Result::Ok(values)
+}
+
+pub fn encode_tlv(tag: u8, content: Slice[u8], limits: Limits) -> Result[Vec[u8], Error] {
+    limits.validate()?;
+    if tag == 0 || tag % 32 == 31 {
+        return Result::Err(error(ErrorKind::InvalidTag, 0, "unsupported DER tag form"))
+    }
+    wrap(tag, content.to_vec(), limits)
+}
+
+fn compare_der(left: Slice[u8], right: Slice[u8]) -> isize {
+    let shorter = if left.len() < right.len() {
+        left.len()
+    } else {
+        right.len()
+    };
+    for index in 0..shorter {
+        if left[index] < right[index] {
+            return -1
+        }
+        if left[index] > right[index] {
+            return 1
+        }
+    }
+    if left.len() < right.len() {
+        -1
+    } else if left.len() > right.len() {
+        1
+    } else {
+        0
+    }
+}
+
+fn validate_tlv(value: Tlv, limits: Limits, depth: isize, count: Ref[isize]) -> Result[(), Error] {
+    if depth > limits.max_depth || count.get() >= limits.max_elements {
+        return Result::Err(error(ErrorKind::Limit, 0, "DER nesting or element limit exceeded"))
+    }
+    count.set(count.get() + 1);
+    if value.tag < 64 {
+        let number = value.tag % 32;
+        let constructed = value.tag >= 32;
+        if (number == 16 || number == 17) && !constructed {
+            return Result::Err(
+                error(ErrorKind::InvalidTag, 0, "SEQUENCE and SET must be constructed"),
+            )
+        }
+        if constructed
+            && Vec::from_array([1, 2, 3, 4, 5, 6, 10, 12, 18, 19, 20, 22, 23, 24, 26, 27, 28, 30]).contains(
+                number,
+            ) {
+            return Result::Err(
+                error(ErrorKind::InvalidTag, 0, "primitive type uses constructed form"),
+            )
+        }
+    }
+    if value.tag / 32 % 2 == 1 {
+        let children = split_tlvs(value.content.as_slice(), limits)?;
+        let mut previous: Option[Vec[u8]] = Option::None;
+        for child in children {
+            if value.tag == 49 {
+                let encoded = encode_tlv(child.tag, child.content.as_slice(), limits)?;
+                if let Some(last) = previous {
+                    if compare_der(last.as_slice(), encoded.as_slice()) > 0 {
+                        return Result::Err(
+                            error(ErrorKind::NonCanonical, 0, "SET elements are unsorted"),
+                        )
+                    }
+                }
+                previous = Option::Some(encoded);
+            }
+            validate_tlv(child, limits, depth + 1, count)?;
+        }
+    } else {
+        match value.tag {
+            1 => if value.content.len() != 1 || (value.content[0] != 0 && value.content[0] != 255) {
+                return Result::Err(error(ErrorKind::NonCanonical, 0, "invalid DER BOOLEAN"))
+            },
+            2 => {
+                if value.content.len() == 0 {
+                    return Result::Err(error(ErrorKind::InvalidValue, 0, "empty DER INTEGER"))
+                }
+                if value.content.len() > 1
+                    && ((value.content[0] == 0 && value.content[1] < 128)
+                        || (value.content[0] == 255 && value.content[1] >= 128)) {
+                    return Result::Err(error(ErrorKind::NonCanonical, 0, "overlong DER INTEGER"))
+                }
+            },
+            3 => {
+                if value.content.len() == 0 || value.content[0] > 7 {
+                    return Result::Err(
+                        error(ErrorKind::InvalidValue, 0, "invalid BIT STRING padding"),
+                    )
+                }
+                let mut divisor = 1;
+                for _ in 0..value.content[0].to_isize() {
+                    divisor *= 2;
+                }
+                if (value.content.len() == 1 && divisor != 1)
+                    || (value.content.len() > 1
+                        && value.content[value.content.len() - 1].to_isize() % divisor != 0) {
+                    return Result::Err(
+                        error(ErrorKind::NonCanonical, 0, "nonzero BIT STRING padding"),
+                    )
+                }
+            },
+            5 => if value.content.len() != 0 {
+                return Result::Err(error(ErrorKind::InvalidValue, 0, "NULL must be empty"))
+            },
+            6 => {
+                let _ = decode_oid(value.content.as_slice(), limits)?;
+            },
+            12 => {
+                utf8::validate(value.content.as_slice()).map_err(
+                    |_| error(ErrorKind::InvalidUtf8, 0, "invalid UTF8String"),
+                )?;
+            },
+            _ => (),
+        }
+    }
+    Result::Ok(())
+}
+
+pub fn validate_der(input: Slice[u8], limits: Limits) -> Result[(), Error] {
+    let value = parse_tlv(input, limits)?;
+    validate_tlv(value, limits, 0, Ref::new(0))
+}

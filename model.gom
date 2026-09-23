@@ -1,0 +1,74 @@
+package asn1;
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum ErrorKind {
+    UnexpectedEof,
+    InvalidTag,
+    InvalidLength,
+    NonCanonical,
+    InvalidValue,
+    InvalidUtf8,
+    Limit,
+    TypeMismatch,
+    TrailingData,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Error {
+    pub kind: ErrorKind,
+    pub offset: isize,
+    pub message: string,
+}
+
+impl ToString for Error {
+    fn to_string(self: Error) -> string {
+        f"byte {self.offset}: {self.message}"
+    }
+}
+
+fn error(kind: ErrorKind, offset: isize, message: string) -> Error {
+    Error { kind, offset, message }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Limits {
+    pub max_bytes: isize,
+    pub max_depth: isize,
+    pub max_elements: isize,
+    pub max_oid_arcs: isize,
+}
+
+impl Limits {
+    pub fn standard() -> Limits {
+        Limits { max_bytes: 1048576, max_depth: 32, max_elements: 10000, max_oid_arcs: 64 }
+    }
+
+    fn validate(self: Limits) -> Result[(), Error] {
+        if self.max_bytes < 0 || self.max_depth < 0 || self.max_elements < 0
+            || self.max_oid_arcs < 2 {
+            Result::Err(error(ErrorKind::Limit, 0, "invalid DER limits"))
+        } else {
+            Result::Ok(())
+        }
+    }
+}
+
+pub enum Value {
+    Boolean(bool),
+    Integer(i64),
+    Null,
+    Octets(Vec[u8]),
+    Utf8(string),
+    Oid(Vec[u64]),
+    Sequence(Vec[Value]),
+}
+
+pub enum Schema {
+    Boolean,
+    Integer,
+    Null,
+    Octets,
+    Utf8,
+    Oid,
+    Sequence(Vec[Schema]),
+}

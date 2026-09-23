@@ -1,0 +1,98 @@
+package asn1;
+
+fn write_arc(value: u64, output: Vec[u8]) -> () {
+    let chunks: Vec[u8] = Vec::new();
+    let mut remainder = value;
+    loop {
+        chunks.push((remainder % 128).to_u8());
+        remainder /= 128;
+        if remainder == 0 {
+            break
+        }
+    }
+    for index in 0..chunks.len() {
+        let mut octet = chunks[chunks.len() - index - 1];
+        if index + 1 < chunks.len() {
+            octet += 128;
+        }
+        output.push(octet);
+    }
+}
+
+pub fn encode_oid(arcs: Slice[u64], limits: Limits) -> Result[Vec[u8], Error] {
+    limits.validate()?;
+    if arcs.len() < 2 || arcs.len() > limits.max_oid_arcs {
+        return Result::Err(error(ErrorKind::Limit, 0, "OID arc count outside limit"))
+    }
+    if arcs[0] > 2 || (arcs[0] < 2 && arcs[1] >= 40) {
+        return Result::Err(error(ErrorKind::InvalidValue, 0, "invalid first OID arcs"))
+    }
+    if arcs[0] == 2 && arcs[1] > 18446744073709551535 {
+        return Result::Err(error(ErrorKind::InvalidValue, 0, "OID first subidentifier overflows"))
+    }
+    let output: Vec[u8] = Vec::new();
+    write_arc(arcs[0] * 40 + arcs[1], output);
+    for index in 2..arcs.len() {
+        write_arc(arcs[index], output);
+        if output.len() > limits.max_bytes {
+            return Result::Err(error(ErrorKind::Limit, 0, "OID exceeds byte limit"))
+        }
+    }
+    if output.len() > limits.max_bytes {
+        return Result::Err(error(ErrorKind::Limit, 0, "OID exceeds byte limit"))
+    }
+    Result::Ok(output)
+}
+
+fn read_arc(input: Slice[u8], cursor: Ref[isize]) -> Result[u64, Error] {
+    let start = cursor.get();
+    let mut value: u64 = 0;
+    loop {
+        if cursor.get() >= input.len() {
+            return Result::Err(error(ErrorKind::UnexpectedEof, cursor.get(), "truncated OID arc"))
+        }
+        let octet = input[cursor.get()];
+        cursor.set(cursor.get() + 1);
+        if cursor.get() == start + 1 && octet == 128 {
+            return Result::Err(error(ErrorKind::NonCanonical, start, "overlong OID arc"))
+        }
+        let low = (octet % 128).to_u64();
+        if value > (18446744073709551615 - low) / 128 {
+            return Result::Err(error(ErrorKind::InvalidValue, start, "OID arc overflows u64"))
+        }
+        value = value * 128 + low;
+        if octet < 128 {
+            return Result::Ok(value)
+        }
+    }
+}
+
+pub fn decode_oid(input: Slice[u8], limits: Limits) -> Result[Vec[u64], Error] {
+    limits.validate()?;
+    if input.len() > limits.max_bytes {
+        return Result::Err(error(ErrorKind::Limit, 0, "OID exceeds byte limit"))
+    }
+    if input.len() == 0 {
+        return Result::Err(error(ErrorKind::InvalidValue, 0, "OID content is empty"))
+    }
+    let cursor = Ref::new(0);
+    let first = read_arc(input, cursor)?;
+    let arcs: Vec[u64] = Vec::new();
+    if first < 40 {
+        arcs.push(0);
+        arcs.push(first);
+    } else if first < 80 {
+        arcs.push(1);
+        arcs.push(first - 40);
+    } else {
+        arcs.push(2);
+        arcs.push(first - 80);
+    }
+    while cursor.get() < input.len() {
+        if arcs.len() >= limits.max_oid_arcs {
+            return Result::Err(error(ErrorKind::Limit, cursor.get(), "OID arc count exceeds limit"))
+        }
+        arcs.push(read_arc(input, cursor)?);
+    }
+    Result::Ok(arcs)
+}

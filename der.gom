@@ -1,0 +1,252 @@
+package asn1;
+
+use std::utf8;
+
+fn append_bounded(output: Vec[u8], data: Slice[u8], limit: isize) -> Result[(), Error] {
+    if data.len() > limit - output.len() {
+        return Result::Err(error(ErrorKind::Limit, output.len(), "DER exceeds byte limit"))
+    }
+    for octet in data {
+        output.push(octet);
+    }
+    Result::Ok(())
+}
+
+fn wrap(tag: u8, content: Vec[u8], limits: Limits) -> Result[Vec[u8], Error] {
+    let output: Vec[u8] = Vec::new();
+    output.push(tag);
+    if content.len() < 128 {
+        output.push(content.len().to_u8());
+    } else {
+        let octets: Vec[u8] = Vec::new();
+        let mut size = content.len().to_u64();
+        while size > 0 {
+            octets.push((size % 256).to_u8());
+            size /= 256;
+        }
+        output.push((128 + octets.len()).to_u8());
+        for index in 0..octets.len() {
+            output.push(octets[octets.len() - index - 1]);
+        }
+    }
+    append_bounded(output, content.as_slice(), limits.max_bytes)?;
+    Result::Ok(output)
+}
+
+fn integer_content(value: i64) -> Vec[u8] {
+    let octets: Vec[u8] = Vec::new();
+    let mut bits = value.to_u64();
+    for _ in 0..8 {
+        octets.push((bits % 256).to_u8());
+        bits /= 256;
+    }
+    octets.reverse();
+    let mut start = 0;
+    while start < 7 {
+        if octets[start] == 0 && octets[start + 1] < 128 {
+            start += 1;
+        } else if octets[start] == 255 && octets[start + 1] >= 128 {
+            start += 1;
+        } else {
+            break
+        }
+    }
+    octets.slice(start, 8).to_vec()
+}
+
+fn encode_value(value: Value, limits: Limits, depth: isize, count: Ref[isize]) -> Result[
+    Vec[u8],
+    Error,
+] {
+    if depth > limits.max_depth || count.get() >= limits.max_elements {
+        return Result::Err(error(ErrorKind::Limit, 0, "DER nesting or element limit exceeded"))
+    }
+    count.set(count.get() + 1);
+    match value {
+        Value::Boolean(value) => wrap(
+            1,
+            Vec::from_array(
+                [
+                    if value {
+                        255
+                    } else {
+                        0
+                    },
+                ],
+            ),
+            limits,
+        ),
+        Value::Integer(value) => wrap(2, integer_content(value), limits),
+        Value::Null => wrap(5, Vec::new(), limits),
+        Value::Octets(value) => wrap(4, value, limits),
+        Value::Utf8(value) => wrap(12, value.to_bytes(), limits),
+        Value::Oid(value) => wrap(6, encode_oid(value.as_slice(), limits)?, limits),
+        Value::Sequence(values) => {
+            let content: Vec[u8] = Vec::new();
+            for child in values {
+                let encoded = encode_value(child, limits, depth + 1, count)?;
+                append_bounded(content, encoded.as_slice(), limits.max_bytes)?;
+            }
+            wrap(48, content, limits)
+        },
+    }
+}
+
+pub fn encode(value: Value, limits: Limits) -> Result[Vec[u8], Error] {
+    limits.validate()?;
+    encode_value(value, limits, 0, Ref::new(0))
+}
+
+struct Reader {
+    input: Slice[u8],
+    cursor: Ref[isize],
+    elements: Ref[isize],
+    limits: Limits,
+}
+
+impl Reader {
+    fn take(self: Reader, length: isize, end: isize) -> Result[Slice[u8], Error] {
+        let start = self.cursor.get();
+        if length < 0 || length > end - start {
+            return Result::Err(error(ErrorKind::UnexpectedEof, start, "truncated DER value"))
+        }
+        self.cursor.set(start + length);
+        Result::Ok(self.input.sub(start, start + length))
+    }
+
+    fn byte(self: Reader, end: isize) -> Result[u8, Error] {
+        Result::Ok(self.take(1, end)?[0])
+    }
+
+    fn length(self: Reader, end: isize) -> Result[isize, Error] {
+        let offset = self.cursor.get();
+        let first = self.byte(end)?;
+        if first < 128 {
+            return Result::Ok(first.to_isize())
+        }
+        if first == 128 {
+            return Result::Err(
+                error(ErrorKind::InvalidLength, offset, "indefinite length is not DER"),
+            )
+        }
+        let width = (first - 128).to_isize();
+        if width > 8 {
+            return Result::Err(error(ErrorKind::InvalidLength, offset, "DER length is too wide"))
+        }
+        let digits = self.take(width, end)?;
+        if digits[0] == 0 {
+            return Result::Err(error(ErrorKind::NonCanonical, offset, "overlong DER length"))
+        }
+        let mut length: u64 = 0;
+        for digit in digits {
+            if length > (18446744073709551615 - digit.to_u64()) / 256 {
+                return Result::Err(error(ErrorKind::InvalidLength, offset, "DER length overflows"))
+            }
+            length = length * 256 + digit.to_u64();
+        }
+        if length < 128 {
+            return Result::Err(
+                error(ErrorKind::NonCanonical, offset, "long length for short value"),
+            )
+        }
+        if length > self.limits.max_bytes.to_u64() {
+            return Result::Err(error(ErrorKind::Limit, offset, "DER content exceeds byte limit"))
+        }
+        Result::Ok(length.to_isize())
+    }
+
+    fn value(self: Reader, end: isize, depth: isize) -> Result[Value, Error] {
+        let offset = self.cursor.get();
+        if depth > self.limits.max_depth || self.elements.get() >= self.limits.max_elements {
+            return Result::Err(
+                error(ErrorKind::Limit, offset, "DER nesting or element limit exceeded"),
+            )
+        }
+        self.elements.set(self.elements.get() + 1);
+        let tag = self.byte(end)?;
+        let length = self.length(end)?;
+        if length > end - self.cursor.get() {
+            return Result::Err(
+                error(ErrorKind::UnexpectedEof, self.cursor.get(), "truncated DER content"),
+            )
+        }
+        let content_start = self.cursor.get();
+        let content_end = content_start + length;
+        if tag == 48 {
+            let values: Vec[Value] = Vec::new();
+            while self.cursor.get() < content_end {
+                values.push(self.value(content_end, depth + 1)?);
+            }
+            return Result::Ok(Value::Sequence(values))
+        }
+        let content = self.take(length, end)?;
+        match tag {
+            1 => if length == 1 && (content[0] == 0 || content[0] == 255) {
+                Result::Ok(Value::Boolean(content[0] == 255))
+            } else {
+                Result::Err(error(ErrorKind::NonCanonical, content_start, "invalid DER BOOLEAN"))
+            },
+            2 => {
+                if length == 0 || length > 8 {
+                    return Result::Err(
+                        error(ErrorKind::InvalidValue, content_start, "INTEGER outside i64"),
+                    )
+                }
+                if length > 1
+                    && ((content[0] == 0 && content[1] < 128)
+                        || (content[0] == 255 && content[1] >= 128)) {
+                    return Result::Err(
+                        error(ErrorKind::NonCanonical, content_start, "overlong INTEGER"),
+                    )
+                }
+                let mut number: i64 = if content[0] >= 128 {
+                    -1
+                } else {
+                    0
+                };
+                for octet in content {
+                    number = number * 256 + octet.to_i64();
+                }
+                Result::Ok(Value::Integer(number))
+            },
+            4 => Result::Ok(Value::Octets(content.to_vec())),
+            5 => if length == 0 {
+                Result::Ok(Value::Null)
+            } else {
+                Result::Err(error(ErrorKind::InvalidValue, content_start, "NULL must be empty"))
+            },
+            6 => Result::Ok(
+                Value::Oid(
+                    decode_oid(content, self.limits).map_err(
+                        |problem| Error {
+                            kind: problem.kind,
+                            offset: content_start + problem.offset,
+                            message: problem.message,
+                        },
+                    )?,
+                ),
+            ),
+            12 => Result::Ok(
+                Value::Utf8(
+                    utf8::decode_slice(content).map_err(
+                        |_| error(ErrorKind::InvalidUtf8, content_start, "invalid UTF-8 string"),
+                    )?,
+                ),
+            ),
+            _ => Result::Err(error(ErrorKind::InvalidTag, offset, "unsupported DER tag")),
+        }
+    }
+}
+
+pub fn decode(input: Slice[u8], limits: Limits) -> Result[Value, Error] {
+    limits.validate()?;
+    if input.len() > limits.max_bytes {
+        return Result::Err(error(ErrorKind::Limit, 0, "DER input exceeds byte limit"))
+    }
+    let reader = Reader { input, cursor: Ref::new(0), elements: Ref::new(0), limits };
+    let value = reader.value(input.len(), 0)?;
+    if reader.cursor.get() != input.len() {
+        return Result::Err(error(ErrorKind::TrailingData, reader.cursor.get(), "trailing DER data"))
+    }
+    Result::Ok(value)
+}

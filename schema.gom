@@ -1,0 +1,45 @@
+package asn1;
+
+fn check_schema(value: Value, schema: Schema, limits: Limits, depth: isize, count: Ref[isize]) -> Result[
+    (),
+    Error,
+] {
+    if depth > limits.max_depth || count.get() >= limits.max_elements {
+        return Result::Err(error(ErrorKind::Limit, 0, "schema nesting or element limit exceeded"))
+    }
+    count.set(count.get() + 1);
+    match (value, schema) {
+        (Value::Boolean(_), Schema::Boolean) | (Value::Integer(_), Schema::Integer) | (
+            Value::Null,
+            Schema::Null,
+        ) | (Value::Octets(_), Schema::Octets) | (Value::Utf8(_), Schema::Utf8) | (
+            Value::Oid(_),
+            Schema::Oid,
+        ) => Result::Ok(()),
+        (Value::Sequence(values), Schema::Sequence(fields)) => {
+            if values.len() != fields.len() {
+                return Result::Err(
+                    error(ErrorKind::TypeMismatch, 0, "sequence field count differs"),
+                )
+            }
+            for index in 0..values.len() {
+                check_schema(values[index], fields[index], limits, depth + 1, count)?;
+            }
+            Result::Ok(())
+        },
+        _ => Result::Err(error(ErrorKind::TypeMismatch, 0, "DER value does not match schema")),
+    }
+}
+
+pub fn encode_as(value: Value, schema: Schema, limits: Limits) -> Result[Vec[u8], Error] {
+    limits.validate()?;
+    check_schema(value, schema, limits, 0, Ref::new(0))?;
+    encode(value, limits)
+}
+
+pub fn decode_as(input: Slice[u8], schema: Schema, limits: Limits) -> Result[Value, Error] {
+    limits.validate()?;
+    let value = decode(input, limits)?;
+    check_schema(value, schema, limits, 0, Ref::new(0))?;
+    Result::Ok(value)
+}
