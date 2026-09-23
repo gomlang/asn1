@@ -1,0 +1,229 @@
+package tests;
+
+use ecosystem::asn1;
+use ecosystem::asn1::{ErrorKind, Limits, Schema, Value};
+use std::testing;
+
+fn standard() -> Limits {
+    Limits::standard()
+}
+
+fn reject(data: Vec[u8], expected: ErrorKind) -> () {
+    testing::assert_eq(
+        testing::expect_err(asn1::decode(data.as_slice(), standard()), "invalid DER").kind,
+        expected,
+    );
+}
+
+#[test]
+fn canonical_scalar_and_sequence_vectors() -> () {
+    let values: Vec[(Value, Vec[u8])] = Vec::from_array(
+        [
+            (Value::Boolean(true), Vec::from_array([1, 1, 255])),
+            (Value::Boolean(false), Vec::from_array([1, 1, 0])),
+            (Value::Integer(0), Vec::from_array([2, 1, 0])),
+            (Value::Integer(127), Vec::from_array([2, 1, 127])),
+            (Value::Integer(128), Vec::from_array([2, 2, 0, 128])),
+            (Value::Integer(-1), Vec::from_array([2, 1, 255])),
+            (Value::Integer(-129), Vec::from_array([2, 2, 255, 127])),
+            (Value::Null, Vec::from_array([5, 0])),
+            (Value::Octets(Vec::from_array([0, 255])), Vec::from_array([4, 2, 0, 255])),
+            (Value::Utf8("é"), Vec::from_array([12, 2, 195, 169])),
+            (
+                Value::Oid(Vec::from_array([1, 2, 840, 113549])),
+                Vec::from_array([6, 6, 42, 134, 72, 134, 247, 13]),
+            ),
+        ],
+    );
+    for (value, expected) in values {
+        testing::assert(
+            testing::expect_ok(asn1::encode(value, standard()), "encode scalar") == expected,
+        );
+        testing::assert(
+            testing::expect_ok(
+                asn1::encode(
+                    testing::expect_ok(
+                        asn1::decode(expected.as_slice(), standard()),
+                        "decode scalar",
+                    ),
+                    standard(),
+                ),
+                "re-encode scalar",
+            )
+                == expected,
+        );
+    }
+    let schema = Schema::Sequence(Vec::from_array([Schema::Integer, Schema::Oid, Schema::Utf8]));
+    let value = Value::Sequence(
+        Vec::from_array(
+            [Value::Integer(42), Value::Oid(Vec::from_array([1, 2, 3])), Value::Utf8("A")],
+        ),
+    );
+    let encoded = Vec::from_array([48, 10, 2, 1, 42, 6, 2, 42, 3, 12, 1, 65]);
+    testing::assert(
+        testing::expect_ok(asn1::encode_as(value, schema, standard()), "encode schema") == encoded,
+    );
+    testing::assert_ok(asn1::decode_as(encoded.as_slice(), schema, standard()));
+    testing::assert_eq(
+        testing::expect_err(
+            asn1::decode_as(
+                encoded.as_slice(),
+                Schema::Sequence(Vec::from_array([Schema::Integer])),
+                standard(),
+            ),
+            "wrong schema",
+        ).kind,
+        ErrorKind::TypeMismatch,
+    );
+}
+
+#[test]
+fn integer_oid_and_length_bounds() -> () {
+    for number in Vec::from_array(
+        [-9223372036854775808, -32769, -128, -1, 0, 127, 32768, 9223372036854775807],
+    ) {
+        let encoded = testing::expect_ok(
+            asn1::encode(Value::Integer(number), standard()),
+            "integer",
+        );
+        let Value::Integer(actual) = testing::expect_ok(
+            asn1::decode(encoded.as_slice(), standard()),
+            "integer decode",
+        ) else {
+            testing::fail("integer tag");
+            return
+        };
+        testing::assert_eq(actual, number);
+    }
+    let oid = Vec::from_array([2, 999, 3]);
+    testing::assert(
+        testing::expect_ok(asn1::encode_oid(oid.as_slice(), standard()), "OID")
+            == Vec::from_array([136, 55, 3]),
+    );
+    testing::assert(
+        testing::expect_ok(
+            asn1::decode_oid(Vec::from_array([136, 55, 3]).as_slice(), standard()),
+            "OID decode",
+        )
+            == oid,
+    );
+    let blob: Vec[u8] = Vec::new();
+    for _ in 0..128 {
+        blob.push(7);
+    }
+    let encoded = testing::expect_ok(asn1::encode(Value::Octets(blob), standard()), "long length");
+    testing::assert_eq(encoded[0], 4);
+    testing::assert_eq(encoded[1], 129);
+    testing::assert_eq(encoded[2], 128);
+    testing::assert_ok(asn1::decode(encoded.as_slice(), standard()));
+    testing::assert_err(asn1::encode_oid(Vec::from_array([1, 40]).as_slice(), standard()));
+    testing::assert_err(
+        asn1::encode_oid(Vec::from_array([2, 18446744073709551615]).as_slice(), standard()),
+    );
+    testing::assert_eq(
+        testing::expect_err(
+            asn1::decode_oid(Vec::from_array([128, 0]).as_slice(), standard()),
+            "overlong arc",
+        ).kind,
+        ErrorKind::NonCanonical,
+    );
+    testing::assert_eq(
+        testing::expect_err(
+            asn1::decode_oid(Vec::from_array([129]).as_slice(), standard()),
+            "truncated arc",
+        ).kind,
+        ErrorKind::UnexpectedEof,
+    );
+    testing::assert_eq(
+        testing::expect_err(
+            asn1::decode_oid(
+                Vec::from_array([129, 128, 128, 128, 128, 128, 128, 128, 128, 128, 0]).as_slice(),
+                standard(),
+            ),
+            "overflowing arc",
+        ).kind,
+        ErrorKind::InvalidValue,
+    );
+}
+
+#[test]
+fn malformed_der_and_limits_are_recoverable() -> () {
+    reject(Vec::new(), ErrorKind::UnexpectedEof);
+    reject(Vec::from_array([2, 128]), ErrorKind::InvalidLength);
+    reject(Vec::from_array([2, 129, 1, 0]), ErrorKind::NonCanonical);
+    reject(Vec::from_array([2, 130, 0, 128]), ErrorKind::NonCanonical);
+    reject(Vec::from_array([2, 2, 0, 127]), ErrorKind::NonCanonical);
+    reject(Vec::from_array([2, 2, 255, 128]), ErrorKind::NonCanonical);
+    reject(Vec::from_array([1, 1, 1]), ErrorKind::NonCanonical);
+    reject(Vec::from_array([5, 1, 0]), ErrorKind::InvalidValue);
+    reject(Vec::from_array([12, 1, 255]), ErrorKind::InvalidUtf8);
+    reject(Vec::from_array([31, 0]), ErrorKind::InvalidTag);
+    reject(Vec::from_array([48, 3, 2, 2, 1]), ErrorKind::UnexpectedEof);
+    reject(Vec::from_array([5, 0, 5, 0]), ErrorKind::TrailingData);
+    reject(Vec::from_array([2, 9, 0, 128, 0, 0, 0, 0, 0, 0, 0]), ErrorKind::InvalidValue);
+    testing::assert_eq(
+        testing::expect_err(
+            asn1::encode_as(Value::Integer(1), Schema::Boolean, standard()),
+            "wrong scalar schema",
+        ).kind,
+        ErrorKind::TypeMismatch,
+    );
+    let mut limits = standard();
+    limits.max_bytes = 2;
+    testing::assert_eq(
+        testing::expect_err(
+            asn1::decode(Vec::from_array([4, 2, 1, 2]).as_slice(), limits),
+            "byte limit",
+        ).kind,
+        ErrorKind::Limit,
+    );
+    testing::assert_err(asn1::encode(Value::Integer(128), limits));
+    limits = standard();
+    limits.max_depth = 0;
+    testing::assert_err(asn1::decode(Vec::from_array([48, 2, 5, 0]).as_slice(), limits));
+    limits = standard();
+    limits.max_elements = 1;
+    testing::assert_err(asn1::encode(Value::Sequence(Vec::from_array([Value::Null])), limits));
+    limits = standard();
+    limits.max_oid_arcs = 2;
+    testing::assert_err(asn1::decode_oid(Vec::from_array([42, 3]).as_slice(), limits));
+}
+
+#[test]
+fn explicit_tlv_framing_checks_set_order_and_context_children() -> () {
+    let set = Vec::from_array([49, 4, 5, 0, 5, 0]);
+    testing::assert_ok(asn1::validate_der(set.as_slice(), standard()));
+    let unsorted = Vec::from_array([49, 6, 2, 1, 2, 2, 1, 1]);
+    testing::assert_eq(
+        testing::expect_err(asn1::validate_der(unsorted.as_slice(), standard()), "unsorted SET").kind,
+        ErrorKind::NonCanonical,
+    );
+    let contextual = Vec::from_array([160, 2, 5, 0]);
+    testing::assert_ok(asn1::validate_der(contextual.as_slice(), standard()));
+    testing::assert_ok(
+        asn1::validate_der(
+            Vec::from_array([2, 9, 0, 128, 0, 0, 0, 0, 0, 0, 0]).as_slice(),
+            standard(),
+        ),
+    );
+    testing::assert_err(asn1::validate_der(Vec::from_array([36, 0]).as_slice(), standard()));
+    testing::assert_err(asn1::validate_der(Vec::from_array([16, 0]).as_slice(), standard()));
+    testing::assert_err(asn1::validate_der(Vec::from_array([3, 2, 3, 1]).as_slice(), standard()));
+    let root = testing::expect_ok(asn1::parse_tlv(contextual.as_slice(), standard()), "context tag");
+    testing::assert_eq(root.tag, 160);
+    testing::assert(root.content == Vec::from_array([5, 0]));
+    let children = testing::expect_ok(
+        asn1::split_tlvs(root.content.as_slice(), standard()),
+        "children",
+    );
+    testing::assert_eq(children.len(), 1);
+    testing::assert(
+        testing::expect_ok(
+            asn1::encode_tlv(root.tag, root.content.as_slice(), standard()),
+            "reframe",
+        )
+            == contextual,
+    );
+    testing::assert_err(asn1::parse_tlv(Vec::from_array([5, 0, 5, 0]).as_slice(), standard()));
+    testing::assert_err(asn1::encode_tlv(31, Vec::new().as_slice(), standard()));
+}
