@@ -1,0 +1,34 @@
+package tests;
+
+use ecosystem::asn1;
+use ecosystem::asn1::{Schema, Value};
+use std::testing;
+
+#[test]
+fn versioned_registry_der_schema_round_trip() -> () {
+    let schema = Schema::Sequence(Vec::from_array([Schema::Oid, Schema::Integer, Schema::Utf8]));
+    let value = Value::Sequence(
+        Vec::from_array(
+            [
+                Value::Oid(Vec::from_array([1, 2, 840, 113549])),
+                Value::Integer(2026),
+                Value::Utf8("certificate label"),
+            ],
+        ),
+    );
+    let encoded = testing::expect_ok(
+        asn1::encode_as(value, schema, asn1::Limits::standard()),
+        "encode schema",
+    );
+    let decoded = testing::expect_ok(
+        asn1::decode_as(encoded.as_slice(), schema, asn1::Limits::standard()),
+        "decode schema",
+    );
+    testing::assert(
+        testing::expect_ok(asn1::encode_as(decoded, schema, asn1::Limits::standard()), "re-encode")
+            == encoded,
+    );
+    testing::assert_err(
+        asn1::decode_as(encoded.as_slice(), Schema::Sequence(Vec::new()), asn1::Limits::standard()),
+    );
+}

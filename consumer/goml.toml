@@ -1,0 +1,5 @@
+[module]
+path = "consumer::asn1"
+
+[dependencies]
+"ecosystem::asn1" = "0.1.0"

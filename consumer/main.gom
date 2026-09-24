@@ -1,0 +1,18 @@
+package main;
+
+use ecosystem::asn1;
+use ecosystem::asn1::{Schema, Value};
+use std::testing;
+
+fn main() -> () {
+    let schema = Schema::Sequence(Vec::from_array([Schema::Oid, Schema::Integer]));
+    let value = Value::Sequence(
+        Vec::from_array([Value::Oid(Vec::from_array([1, 2, 840, 113549])), Value::Integer(7)]),
+    );
+    let encoded = testing::expect_ok(
+        asn1::encode_as(value, schema, asn1::Limits::standard()),
+        "encode DER",
+    );
+    testing::assert_ok(asn1::decode_as(encoded.as_slice(), schema, asn1::Limits::standard()));
+    println("asn1 consumer: ok");
+}
