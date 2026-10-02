@@ -1,0 +1,83 @@
+package tests;
+
+use ecosystem::asn1;
+use std::testing;
+
+fn time_tlv(tag: u8, value: string) -> Vec[u8] {
+    testing::expect_ok(
+        asn1::encode_tlv(tag, value.to_bytes().as_slice(), asn1::Limits::standard()),
+        "time TLV",
+    )
+}
+
+#[test]
+fn der_times_enforce_calendar_and_canonical_fraction_rules_recursively() -> () {
+    for value in Vec::from_array(
+        ["000229000000Z", "491231235959Z", "500101000000Z", "960229123456Z"],
+    ) {
+        testing::assert_ok(
+            asn1::validate_der(time_tlv(23, value).as_slice(), asn1::Limits::standard()),
+        );
+    }
+    for value in Vec::from_array(
+        [
+            "00000229000000Z",
+            "20000229235959.00001Z",
+            "19920722132100.3Z",
+            "20161231235960Z",
+            "20240430235960.1Z",
+            "99991231235959Z",
+        ],
+    ) {
+        let nested = testing::expect_ok(
+            asn1::encode_tlv(48, time_tlv(24, value).as_slice(), asn1::Limits::standard()),
+            "nested time",
+        );
+        testing::assert_ok(asn1::validate_der(nested.as_slice(), asn1::Limits::standard()));
+    }
+    for value in Vec::from_array(
+        [
+            "",
+            "9207221321Z",
+            "920520240000Z",
+            "960229235960Z",
+            "010229000000Z",
+            "001300000000Z",
+            "000100000000Z",
+            "000101006000Z",
+            "000101000000.1Z",
+            "000101000000+0000",
+            "000101000000z",
+        ],
+    ) {
+        let wire = time_tlv(23, value);
+        testing::assert_ok(asn1::parse_tlv(wire.as_slice(), asn1::Limits::standard()));
+        testing::assert_err(asn1::validate_der(wire.as_slice(), asn1::Limits::standard()));
+    }
+    for value in Vec::from_array(
+        [
+            "19000229000000Z",
+            "21000229000000Z",
+            "20240431000000Z",
+            "20240101000060Z",
+            "20240630235860Z",
+            "20240629235960Z",
+            "20240630235961Z",
+            "20240101240000Z",
+            "20240101000000.Z",
+            "20240101000000.0Z",
+            "20240101000000.120Z",
+            "20240101000000,1Z",
+            "20240101000000.1xZ",
+            "20240101000000+0000",
+            "202401010000Z",
+            "20240101000000z",
+        ],
+    ) {
+        let nested = testing::expect_ok(
+            asn1::encode_tlv(48, time_tlv(24, value).as_slice(), asn1::Limits::standard()),
+            "nested bad time",
+        );
+        testing::assert_err(asn1::validate_der(nested.as_slice(), asn1::Limits::standard()));
+    }
+}
