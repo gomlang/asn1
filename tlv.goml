@@ -126,14 +126,16 @@ fn validate_tlv(value: Tlv, limits: Limits, depth: isize, count: Ref[isize]) -> 
             1 => if value.content.len() != 1 || (value.content[0] != 0 && value.content[0] != 255) {
                 return Result::Err(error(ErrorKind::NonCanonical, 0, "invalid DER BOOLEAN"))
             },
-            2 => {
+            2 | 10 => {
                 if value.content.len() == 0 {
-                    return Result::Err(error(ErrorKind::InvalidValue, 0, "empty DER INTEGER"))
+                    return Result::Err(error(ErrorKind::InvalidValue, 0, "empty DER integer value"))
                 }
                 if value.content.len() > 1
                     && ((value.content[0] == 0 && value.content[1] < 128)
                         || (value.content[0] == 255 && value.content[1] >= 128)) {
-                    return Result::Err(error(ErrorKind::NonCanonical, 0, "overlong DER INTEGER"))
+                    return Result::Err(
+                        error(ErrorKind::NonCanonical, 0, "overlong DER integer value"),
+                    )
                 }
             },
             3 => {
@@ -164,6 +166,27 @@ fn validate_tlv(value: Tlv, limits: Limits, depth: isize, count: Ref[isize]) -> 
                 utf8::validate(value.content.as_slice()).map_err(
                     |_| error(ErrorKind::InvalidUtf8, 0, "invalid UTF8String"),
                 )?;
+            },
+            18 | 19 | 22 | 26 => {
+                for octet in value.content {
+                    let valid = match value.tag {
+                        18 => octet == 32 || (octet >= 48 && octet <= 57),
+                        19 => (octet >= 65 && octet <= 90) || (octet >= 97 && octet <= 122)
+                            || (octet >= 48 && octet <= 57)
+                            || b" '()+,-./:=?".contains(octet),
+                        22 => octet < 128,
+                        _ => octet >= 32 && octet <= 126,
+                    };
+                    if !valid {
+                        return Result::Err(
+                            error(
+                                ErrorKind::InvalidValue,
+                                0,
+                                "character outside DER string repertoire",
+                            ),
+                        )
+                    }
+                }
             },
             _ => (),
         }

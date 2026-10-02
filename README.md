@@ -19,7 +19,15 @@ fn encode_identifier() -> Result[Vec[u8], asn1::Error] {
 
 `encode` and `decode` operate on the same typed tree without a schema. `encode_oid` and `decode_oid` handle OID content octets without a DER tag and length. DER decoding rejects nonminimal lengths and integers, invalid BOOLEAN encodings, malformed UTF-8, truncated or overlong OID arcs, unsupported tags, and trailing bytes. Diagnostics include an error kind and byte offset; schema mismatches use offset zero because validation happens on the decoded tree.
 
-For explicit ASN.1 structures that contain additional tags, `Tlv`, `parse_tlv`, `split_tlvs`, and `encode_tlv` expose bounded single-byte-tag DER framing. `validate_der` walks constructed values, enforces depth and element limits, validates the primitive types supported above, and checks DER SET ordering. Unknown primitive tags retain their content bytes; their type-specific rules require an application schema. High-tag-number form and end-of-contents markers are rejected.
+For explicit ASN.1 structures that contain additional tags, `Tlv`, `parse_tlv`, `split_tlvs`, and `encode_tlv` expose bounded single-byte-tag DER framing. `validate_der` walks constructed values, enforces depth and element limits, validates the primitive types supported above, and checks DER SET ordering.
+It also checks minimal nonempty ENUMERATED integer contents and the repertoires
+of NumericString (digits and space), PrintableString (ASN.1 letters, digits and
+its restricted punctuation), IA5String (7-bit bytes), and VisibleString (ASCII
+space through tilde). These checks apply recursively inside constructed values;
+raw TLV framing APIs preserve content without these semantic checks. See
+[ITU-T X.680](https://www.itu.int/rec/T-REC-X.680-202102-I/en) for character
+repertoires and [ITU-T X.690](https://www.itu.int/rec/T-REC-X.690-202102-I/en)
+for encoding rules. Unknown primitive tags retain their content bytes; their type-specific rules require an application schema. High-tag-number form and end-of-contents markers are rejected.
 
 `Limits::standard()` allows at most 1 MiB of input or output, 32 nested sequence levels, 10,000 elements, and 64 OID arcs. Callers may supply stricter limits. All four limits are enforced during decoding and encoding. OID subidentifiers that do not fit `u64` and INTEGERs that do not fit `i64` return errors. Encoded output is canonical for the supported subset.
 
