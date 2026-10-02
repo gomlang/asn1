@@ -23,4 +23,16 @@ For explicit ASN.1 structures that contain additional tags, `Tlv`, `parse_tlv`, 
 
 `Limits::standard()` allows at most 1 MiB of input or output, 32 nested sequence levels, 10,000 elements, and 64 OID arcs. Callers may supply stricter limits. All four limits are enforced during decoding and encoding. OID subidentifiers that do not fit `u64` and INTEGERs that do not fit `i64` return errors. Encoded output is canonical for the supported subset.
 
-Run `(cd ../verification && just ecosystem-test asn1)` from this library repository to test the library, registry consumer, and cached build.
+Run `(cd ../verification && just ecosystem-test asn1)` from this library repository to test the library, example, downstream verification, and cached build.
+
+## Development and examples
+
+Requires GoML 0.1.55 or newer. The `examples/basic/` example shares the root manifest and its dependencies. From the library root, run:
+
+```sh
+goml run --example basic
+goml test
+goml verify --timeout 300s
+```
+
+`goml test` builds the example and runs its tests. `goml verify` repeats the example checks as an independent module against an isolated registry snapshot. `(cd ../verification && just ecosystem-test asn1)` also retains the library-specific smoke and compatibility checks.
