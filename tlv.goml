@@ -167,6 +167,7 @@ fn validate_tlv(value: Tlv, limits: Limits, depth: isize, count: Ref[isize]) -> 
                     |_| error(ErrorKind::InvalidUtf8, 0, "invalid UTF8String"),
                 )?;
             },
+            23 | 24 => validate_time(value.tag, value.content)?,
             18 | 19 | 22 | 26 => {
                 for octet in value.content {
                     let valid = match value.tag {

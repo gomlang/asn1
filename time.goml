@@ -1,0 +1,69 @@
+package asn1;
+
+fn time_digits(data: Vec[u8], start: isize, length: isize) -> isize {
+    let mut result = 0;
+    for at in start..start + length {
+        result = result * 10 + (data[at] - 48).to_isize();
+    }
+    result
+}
+
+fn validate_time(tag: u8, data: Vec[u8]) -> Result[(), Error] {
+    let year_width = if tag == 23 {
+        2
+    } else {
+        4
+    };
+    let whole = year_width + 10;
+    if data.len() < whole + 1 || data[data.len() - 1] != b'Z'
+        || tag == 23 && data.len() != whole + 1 {
+        return Result::Err(
+            error(ErrorKind::NonCanonical, 0, "DER time requires complete seconds and UTC Z"),
+        )
+    }
+    for at in 0..whole {
+        if data[at] < b'0' || data[at] > b'9' {
+            return Result::Err(error(ErrorKind::InvalidValue, 0, "invalid DER time digit"))
+        }
+    }
+    if data.len() > whole + 1 {
+        if data[whole] != b'.' || data.len() < whole + 3 || data[data.len() - 2] == b'0' {
+            return Result::Err(
+                error(
+                    ErrorKind::NonCanonical,
+                    0,
+                    "DER fractional seconds require a period and no trailing zeros",
+                ),
+            )
+        }
+        for at in whole + 1..data.len() - 1 {
+            if data[at] < b'0' || data[at] > b'9' {
+                return Result::Err(error(ErrorKind::InvalidValue, 0, "invalid DER time fraction"))
+            }
+        }
+    }
+    let year = time_digits(data, 0, year_width);
+    let month = time_digits(data, year_width, 2);
+    let day = time_digits(data, year_width + 2, 2);
+    let hour = time_digits(data, year_width + 4, 2);
+    let minute = time_digits(data, year_width + 6, 2);
+    let second = time_digits(data, year_width + 8, 2);
+    let leap = year % 4 == 0 && (tag == 23 || year % 100 != 0 || year % 400 == 0);
+    let days = match month {
+        2 => if leap {
+            29
+        } else {
+            28
+        },
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    let leap_second = tag == 24 && second == 60 && hour == 23 && minute == 59 && day == days;
+    if month < 1 || month > 12 || day < 1 || day > days || hour > 23 || minute > 59
+        || second > 59 && !leap_second {
+        return Result::Err(
+            error(ErrorKind::InvalidValue, 0, "DER time calendar component out of range"),
+        )
+    }
+    Result::Ok(())
+}

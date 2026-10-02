@@ -27,7 +27,20 @@ It also checks minimal nonempty ENUMERATED integer contents and the repertoires
 of NumericString (digits and space), PrintableString (ASN.1 letters, digits and
 its restricted punctuation), IA5String (7-bit bytes), and VisibleString (ASCII
 space through tilde). These checks apply recursively inside constructed values;
-raw TLV framing APIs preserve content without these semantic checks. See
+raw TLV framing APIs preserve content without these semantic checks.
+
+Universal UTCTime and GeneralizedTime are also validated: complete seconds and
+uppercase `Z` are required. GeneralizedTime permits a period followed by a
+nonempty fractional part with no trailing zero; UTCTime has no fractional part.
+Calendar components use Gregorian month lengths and leap years, hours 00–23,
+and minutes 00–59. UTCTime seconds are 00–59 under X.680; its two-digit year does
+not imply a century window (year `00` may represent a leap century).
+GeneralizedTime accepts second `60` only at month-end 23:59 as a possible ISO 8601
+leap-second position; historical/future leap-second announcements are not checked.
+Four-digit years, including `0000`, are interpreted proleptically. These are TLV
+validation rules, not new `Value`/`Schema` variants or certificate time policies.
+
+See
 [ITU-T X.680](https://www.itu.int/rec/T-REC-X.680-202102-I/en) for character
 repertoires and [ITU-T X.690](https://www.itu.int/rec/T-REC-X.690-202102-I/en)
 for encoding rules. Unknown primitive tags retain their content bytes; their type-specific rules require an application schema. High-tag-number form and end-of-contents markers are rejected.
