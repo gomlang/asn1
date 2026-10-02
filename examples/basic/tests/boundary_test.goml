@@ -1,0 +1,25 @@
+package tests;
+
+use ecosystem::asn1;
+use std::testing;
+
+#[test]
+fn downstream_tlv_framing_and_semantic_validation_remain_distinct() -> () {
+    let invalid = testing::expect_ok(
+        asn1::encode_tlv(19, b"name@example".as_slice(), asn1::Limits::standard()),
+        "raw PrintableString",
+    );
+    testing::assert_ok(asn1::parse_tlv(invalid.as_slice(), asn1::Limits::standard()));
+    testing::assert_eq(
+        testing::expect_err(
+            asn1::validate_der(invalid.as_slice(), asn1::Limits::standard()),
+            "PrintableString repertoire",
+        ).kind,
+        asn1::ErrorKind::InvalidValue,
+    );
+    let valid = testing::expect_ok(
+        asn1::encode_tlv(22, b"name@example".as_slice(), asn1::Limits::standard()),
+        "IA5String",
+    );
+    testing::assert_ok(asn1::validate_der(valid.as_slice(), asn1::Limits::standard()));
+}

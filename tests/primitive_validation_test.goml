@@ -1,0 +1,61 @@
+package tests;
+
+use ecosystem::asn1;
+use std::testing;
+
+fn primitive(tag: u8, content: Vec[u8]) -> Vec[u8] {
+    testing::expect_ok(asn1::encode_tlv(tag, content.as_slice(), asn1::Limits::standard()), "TLV")
+}
+
+#[test]
+fn restricted_der_strings_validate_their_exact_repertoires() -> () {
+    for tag in Vec::from_array([18.to_u8(), 19.to_u8(), 22.to_u8(), 26.to_u8()]) {
+        testing::assert_ok(
+            asn1::validate_der(primitive(tag, Vec::new()).as_slice(), asn1::Limits::standard()),
+        );
+        for value in 0..256 {
+            let allowed = match tag {
+                18 => value == 32 || value >= 48 && value <= 57,
+                19 => "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 '()+,-./:=?".to_bytes().contains(
+                    value.to_u8(),
+                ),
+                22 => value <= 127,
+                _ => value >= 32 && value <= 126,
+            };
+            let encoded = primitive(tag, Vec::from_array([value.to_u8()]));
+            let result = asn1::validate_der(encoded.as_slice(), asn1::Limits::standard());
+            testing::assert_eq(result.is_ok(), allowed);
+            if !allowed {
+                testing::assert_eq(
+                    testing::expect_err(result, "invalid character").kind,
+                    asn1::ErrorKind::InvalidValue,
+                );
+            }
+        }
+    }
+    let invalid = primitive(48, primitive(19, b"hello@world"));
+    testing::assert_err(asn1::validate_der(invalid.as_slice(), asn1::Limits::standard()));
+    testing::assert_ok(asn1::parse_tlv(invalid.as_slice(), asn1::Limits::standard()));
+}
+
+#[test]
+fn enumerated_contents_use_minimal_nonempty_integer_encoding() -> () {
+    for data in Vec::from_array(
+        [b"", Vec::from_array([0.to_u8(), 1]), Vec::from_array([255.to_u8(), 255])],
+    ) {
+        testing::assert_err(
+            asn1::validate_der(primitive(10, data).as_slice(), asn1::Limits::standard()),
+        );
+    }
+    for data in Vec::from_array(
+        [
+            Vec::from_array([0.to_u8()]),
+            Vec::from_array([0.to_u8(), 128]),
+            Vec::from_array([255.to_u8(), 127]),
+        ],
+    ) {
+        testing::assert_ok(
+            asn1::validate_der(primitive(10, data).as_slice(), asn1::Limits::standard()),
+        );
+    }
+}
