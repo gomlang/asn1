@@ -1,0 +1,24 @@
+package tests;
+
+use ecosystem::asn1;
+use std::testing;
+
+#[test]
+fn consumer_decodes_integer_beyond_i64() -> () {
+    let der: Vec[u8] = Vec::from_array([2, 9, 0, 128, 0, 0, 0, 0, 0, 0, 0]);
+    let value = testing::expect_ok(
+        asn1::decode_integer_bytes(der.as_slice(), asn1::Limits::standard()),
+        "positive 2^63",
+    );
+    testing::assert_eq(value.len(), 9);
+    testing::assert(
+        testing::expect_ok(
+            asn1::encode_integer_bytes(value.as_slice(), asn1::Limits::standard()),
+            "encode",
+        )
+            == der,
+    );
+    testing::assert_err(
+        asn1::decode_as(der.as_slice(), asn1::Schema::Integer, asn1::Limits::standard()),
+    );
+}

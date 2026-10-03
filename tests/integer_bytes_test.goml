@@ -1,0 +1,121 @@
+package tests;
+
+use ecosystem::asn1;
+use std::testing;
+
+#[test]
+fn signed_integer_bytes_match_der_vectors_and_own_their_storage() -> () {
+    let vectors: Vec[Vec[u8]] = Vec::from_array(
+        [
+            Vec::from_array([0]),
+            Vec::from_array([127]),
+            Vec::from_array([0, 128]),
+            Vec::from_array([128]),
+            Vec::from_array([255]),
+            Vec::from_array([255, 127]),
+            Vec::from_array([0, 128, 0, 0, 0, 0, 0, 0, 0]),
+            Vec::from_array([255, 127, 255, 255, 255, 255, 255, 255, 255]),
+        ],
+    );
+    for payload in vectors {
+        let input = payload.copy();
+        let encoded = testing::expect_ok(
+            asn1::encode_integer_bytes(input.as_slice(), asn1::Limits::standard()),
+            "encode",
+        );
+        let expected: Vec[u8] = Vec::from_array([2, payload.len().to_u8()]);
+        for octet in payload {
+            expected.push(octet);
+        }
+        testing::assert(encoded == expected);
+        input[0] = input[0] ^ 255;
+        testing::assert(encoded == expected);
+        let decoded = testing::expect_ok(
+            asn1::decode_integer_bytes(encoded.as_slice(), asn1::Limits::standard()),
+            "decode",
+        );
+        testing::assert(decoded == payload);
+        encoded[2] = encoded[2] ^ 255;
+        testing::assert(decoded == payload);
+    }
+}
+
+#[test]
+fn signed_integer_bytes_reject_noncanonical_and_wrong_der() -> () {
+    let invalid: Vec[Vec[u8]] = Vec::from_array(
+        [
+            Vec::new(),
+            Vec::from_array([0, 0]),
+            Vec::from_array([0, 127]),
+            Vec::from_array([255, 128]),
+            Vec::from_array([255, 255]),
+        ],
+    );
+    for payload in invalid {
+        testing::assert_err(
+            asn1::encode_integer_bytes(payload.as_slice(), asn1::Limits::standard()),
+        );
+        let encoded: Vec[u8] = Vec::from_array([2, payload.len().to_u8()]);
+        for octet in payload {
+            encoded.push(octet);
+        }
+        testing::assert_err(
+            asn1::decode_integer_bytes(encoded.as_slice(), asn1::Limits::standard()),
+        );
+    }
+    let invalid: Vec[Vec[u8]] = Vec::from_array(
+        [
+            Vec::from_array([4, 1, 0]),
+            Vec::from_array([34, 3, 2, 1, 0]),
+            Vec::from_array([2, 129, 1, 0]),
+            Vec::from_array([2, 128, 0, 0]),
+            Vec::from_array([2, 2, 0]),
+            Vec::from_array([2, 1, 0, 0]),
+        ],
+    );
+    for encoded in invalid {
+        testing::assert_err(
+            asn1::decode_integer_bytes(encoded.as_slice(), asn1::Limits::standard()),
+        );
+    }
+}
+
+#[test]
+fn signed_integer_bytes_enforce_complete_tlv_limits_at_long_lengths() -> () {
+    for length in Vec::from_array([1, 127, 128, 255, 256]) {
+        let payload: Vec[u8] = Vec::new();
+        for _ in 0..length {
+            payload.push(128);
+        }
+        let encoded = testing::expect_ok(
+            asn1::encode_integer_bytes(payload.as_slice(), asn1::Limits::standard()),
+            "encode",
+        );
+        let exact = asn1::Limits {
+            max_bytes: encoded.len(),
+            max_depth: 0,
+            max_elements: 1,
+            ..asn1::Limits::standard(),
+        };
+        testing::assert(
+            testing::expect_ok(
+                asn1::encode_integer_bytes(payload.as_slice(), exact),
+                "exact encode",
+            )
+                == encoded,
+        );
+        testing::assert(
+            testing::expect_ok(
+                asn1::decode_integer_bytes(encoded.as_slice(), exact),
+                "exact decode",
+            )
+                == payload,
+        );
+        let short = asn1::Limits { max_bytes: encoded.len() - 1, ..exact };
+        testing::assert_err(asn1::encode_integer_bytes(payload.as_slice(), short));
+        testing::assert_err(asn1::decode_integer_bytes(encoded.as_slice(), short));
+        let none = asn1::Limits { max_elements: 0, ..exact };
+        testing::assert_err(asn1::encode_integer_bytes(payload.as_slice(), none));
+        testing::assert_err(asn1::decode_integer_bytes(encoded.as_slice(), none));
+    }
+}

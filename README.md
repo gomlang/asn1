@@ -70,3 +70,19 @@ goml verify --timeout 300s
 ```
 
 `goml test` builds the example and runs its tests. `goml verify` repeats the example checks as an independent module against an isolated registry snapshot. `(cd ../verification && just ecosystem-test asn1)` also retains the library-specific smoke and compatibility checks.
+
+### Arbitrary-width INTEGER bytes
+
+`encode_integer_bytes(payload, limits)` and `decode_integer_bytes(der, limits)`
+encode and decode signed INTEGER values as big-endian two's-complement octets.
+Their payload is the shortest nonempty signed representation: zero is `[0]`,
+positive 128 is `[0, 128]`, and negative 129 is `[255, 127]`. Redundant sign
+extension, empty values, noncanonical DER, trailing data and non-INTEGER tags
+are rejected. These APIs preserve integers wider than `i64`; `Value::Integer`
+and `Schema::Integer` retain their existing `i64` behavior. Neither API performs
+arithmetic or unsigned-magnitude conversion. Returned vectors own their storage.
+
+`max_bytes` bounds the entire DER encoding, including long-form length octets;
+`max_elements` must admit one primitive and depth zero is sufficient. Inputs must
+remain stable during each call. Encoding validates the supplied representation
+rather than silently removing sign octets.

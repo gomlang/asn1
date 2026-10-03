@@ -1,0 +1,30 @@
+package asn1;
+
+fn validate_integer_bytes(data: Slice[u8]) -> Result[(), Error] {
+    if data.len() == 0 {
+        return Result::Err(error(ErrorKind::InvalidValue, 0, "empty INTEGER"))
+    }
+    if data.len() > 1 && ((data[0] == 0 && data[1] < 128) || (data[0] == 255 && data[1] >= 128)) {
+        return Result::Err(error(ErrorKind::NonCanonical, 0, "redundant INTEGER sign octet"))
+    }
+    Result::Ok(())
+}
+
+pub fn encode_integer_bytes(data: Slice[u8], limits: Limits) -> Result[Vec[u8], Error] {
+    limits.validate()?;
+    if limits.max_elements < 1 || limits.max_bytes < 2 || data.len() > limits.max_bytes - 2 {
+        return Result::Err(error(ErrorKind::Limit, 0, "INTEGER exceeds DER limits"))
+    }
+    validate_integer_bytes(data)?;
+    wrap(2, data.to_vec(), limits)
+}
+
+pub fn decode_integer_bytes(input: Slice[u8], limits: Limits) -> Result[Vec[u8], Error] {
+    let value = parse_tlv(input, limits)?;
+    if value.tag != 2 {
+        return Result::Err(error(ErrorKind::TypeMismatch, 0, "expected primitive INTEGER"))
+    }
+    validate_tlv(value, limits, 0, Ref::new(0))?;
+    validate_integer_bytes(value.content.as_slice())?;
+    Result::Ok(value.content.copy())
+}
