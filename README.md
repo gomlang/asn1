@@ -19,6 +19,16 @@ fn encode_identifier() -> Result[Vec[u8], asn1::Error] {
 
 `encode` and `decode` operate on the same typed tree without a schema. `encode_oid` and `decode_oid` handle OID content octets without a DER tag and length. DER decoding rejects nonminimal lengths and integers, invalid BOOLEAN encodings, malformed UTF-8, truncated or overlong OID arcs, unsupported tags, and trailing bytes. Diagnostics include an error kind and byte offset; schema mismatches use offset zero because validation happens on the decoded tree.
 
+`encode_bit_string(data, unused_bits, limits)` emits a complete primitive DER
+BIT STRING; `decode_bit_string(input, limits)` returns `(data, unused_bits)` in
+independent storage. Bits run from most to least significant within each octet.
+The unused-bit count must be 0–7, unused low bits must be zero, and empty data
+requires zero unused bits. Decoding rejects another tag, trailing data,
+constructed encodings and noncanonical padding. Byte and element limits apply
+to the complete DER value. These helpers preserve the supplied bit length;
+ASN.1 named-bit-list schemas require the caller to remove trailing zero bits
+according to X.690 section 11.2.2. They do not add `Value` or `Schema` variants.
+
 For explicit ASN.1 structures that contain additional tags, `Tlv`, `parse_tlv`, `split_tlvs`, and `encode_tlv` expose bounded single-byte-tag DER framing. `validate_der` walks constructed values, enforces depth and element limits, validates the primitive types supported above, and applies lexicographic
 SET OF ordering to universal tag 17. General ASN.1 SET components use a different
 schema-dependent tag order; this generic check is not sufficient to establish

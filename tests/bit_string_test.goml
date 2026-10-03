@@ -1,0 +1,88 @@
+package tests;
+
+use ecosystem::asn1;
+use std::testing;
+
+#[test]
+fn bit_strings_match_der_octets_and_reject_every_nonzero_padding_pattern() -> () {
+    let limits = asn1::Limits::standard();
+    for unused in 0..8 {
+        let divisor = 1 << unused;
+        for value in 0..256 {
+            let data = Vec::from_array([value.to_u8()]);
+            let encoded = asn1::encode_bit_string(data.as_slice(), unused.to_u8(), limits);
+            let raw = Vec::from_array([3.to_u8(), 2, unused.to_u8(), value.to_u8()]);
+            let decoded = asn1::decode_bit_string(raw.as_slice(), limits);
+            testing::assert_eq(encoded.is_ok(), value % divisor == 0);
+            testing::assert_eq(decoded.is_ok(), value % divisor == 0);
+            if value % divisor == 0 {
+                testing::assert(testing::expect_ok(encoded, "encode") == raw);
+                let (payload, padding) = testing::expect_ok(decoded, "decode");
+                testing::assert(payload == data);
+                testing::assert_eq(padding, unused.to_u8());
+            }
+        }
+    }
+    let empty: Vec[u8] = Vec::new();
+    testing::assert(
+        testing::expect_ok(asn1::encode_bit_string(empty.as_slice(), 0, limits), "empty")
+            == Vec::from_array([3.to_u8(), 1, 0]),
+    );
+    testing::assert_err(asn1::encode_bit_string(empty.as_slice(), 1, limits));
+    testing::assert_err(asn1::encode_bit_string(b"a".as_slice(), 8, limits));
+}
+
+#[test]
+fn bit_string_limits_framing_and_storage_are_checked() -> () {
+    let limits = asn1::Limits::standard();
+    let raw = Vec::from_array([3.to_u8(), 2, 3, 160]);
+    for malformed in Vec::from_array(
+        [
+            Vec::from_array([3.to_u8(), 0]),
+            Vec::from_array([3.to_u8(), 1, 8]),
+            Vec::from_array([3.to_u8(), 1, 1]),
+            Vec::from_array([4.to_u8(), 1, 0]),
+            Vec::from_array([35.to_u8(), 0]),
+            Vec::from_array([3.to_u8(), 129, 1, 0]),
+            Vec::from_array([3.to_u8(), 1, 0, 0]),
+        ],
+    ) {
+        testing::assert_err(asn1::decode_bit_string(malformed.as_slice(), limits));
+    }
+    for size in 0..raw.len() {
+        testing::assert_err(asn1::decode_bit_string(raw.slice(0, size), limits));
+        let bounded = asn1::Limits { max_bytes: size, ..limits };
+        testing::assert_err(asn1::decode_bit_string(raw.as_slice(), bounded));
+        testing::assert_err(asn1::encode_bit_string(raw.slice(3, 4), 3, bounded));
+    }
+    testing::assert_ok(
+        asn1::encode_bit_string(raw.slice(3, 4), 3, asn1::Limits { max_bytes: 4, ..limits }),
+    );
+    testing::assert_ok(
+        asn1::decode_bit_string(
+            raw.as_slice(),
+            asn1::Limits { max_bytes: 4, max_depth: 0, max_elements: 1, ..limits },
+        ),
+    );
+    let none = asn1::Limits { max_elements: 0, ..limits };
+    testing::assert_err(asn1::encode_bit_string(raw.slice(3, 4), 3, none));
+    testing::assert_err(asn1::decode_bit_string(raw.as_slice(), none));
+    let (decoded, _) = testing::expect_ok(asn1::decode_bit_string(raw.as_slice(), limits), "decode");
+    decoded[0] = 0;
+    testing::assert_eq(raw[3], 160);
+    let large = Vec::new();
+    for _ in 0..128 {
+        large.push(0.to_u8());
+    }
+    let encoded = testing::expect_ok(
+        asn1::encode_bit_string(large.as_slice(), 0, limits),
+        "long length",
+    );
+    testing::assert_eq(encoded.len(), 132);
+    testing::assert_err(
+        asn1::encode_bit_string(large.as_slice(), 0, asn1::Limits { max_bytes: 131, ..limits }),
+    );
+    testing::assert_ok(
+        asn1::decode_bit_string(encoded.as_slice(), asn1::Limits { max_bytes: 132, ..limits }),
+    );
+}

@@ -1,0 +1,36 @@
+package asn1;
+
+fn validate_bit_string(data: Slice[u8], unused_bits: u8) -> Result[(), Error] {
+    if unused_bits > 7 {
+        return Result::Err(error(ErrorKind::InvalidValue, 0, "invalid BIT STRING padding"))
+    }
+    let mut divisor = 1;
+    for _ in 0..unused_bits.to_isize() {
+        divisor *= 2;
+    }
+    if (data.len() == 0 && unused_bits != 0)
+        || (data.len() > 0 && data[data.len() - 1].to_isize() % divisor != 0) {
+        return Result::Err(error(ErrorKind::NonCanonical, 0, "nonzero BIT STRING padding"))
+    }
+    Result::Ok(())
+}
+
+pub fn encode_bit_string(data: Slice[u8], unused_bits: u8, limits: Limits) -> Result[Vec[u8], Error] {
+    limits.validate()?;
+    if limits.max_elements < 1 || limits.max_bytes < 3 || data.len() > limits.max_bytes - 3 {
+        return Result::Err(error(ErrorKind::Limit, 0, "BIT STRING exceeds DER limits"))
+    }
+    validate_bit_string(data, unused_bits)?;
+    let content = Vec::from_array([unused_bits]);
+    append_bounded(content, data, limits.max_bytes)?;
+    wrap(3, content, limits)
+}
+
+pub fn decode_bit_string(input: Slice[u8], limits: Limits) -> Result[(Vec[u8], u8), Error] {
+    let value = parse_tlv(input, limits)?;
+    if value.tag != 3 {
+        return Result::Err(error(ErrorKind::TypeMismatch, 0, "expected primitive BIT STRING"))
+    }
+    validate_tlv(value, limits, 0, Ref::new(0))?;
+    Result::Ok((value.content.slice(1, value.content.len()).to_vec(), value.content[0]))
+}

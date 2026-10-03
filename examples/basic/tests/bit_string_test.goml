@@ -1,0 +1,22 @@
+package tests;
+
+use ecosystem::asn1;
+use std::testing;
+
+#[test]
+fn downstream_bit_strings_compose_with_explicit_tlv_sequences() -> () {
+    let limits = asn1::Limits::standard();
+    let bits = testing::expect_ok(
+        asn1::encode_bit_string(Vec::from_array([160.to_u8()]).as_slice(), 3, limits),
+        "bits",
+    );
+    let sequence = testing::expect_ok(asn1::encode_tlv(48, bits.as_slice(), limits), "sequence");
+    testing::assert_ok(asn1::validate_der(sequence.as_slice(), limits));
+    let contents = testing::expect_ok(asn1::parse_tlv(sequence.as_slice(), limits), "contents");
+    let (data, unused) = testing::expect_ok(
+        asn1::decode_bit_string(contents.content.as_slice(), limits),
+        "decode",
+    );
+    testing::assert(data == Vec::from_array([160.to_u8()]));
+    testing::assert_eq(unused, 3);
+}

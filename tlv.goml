@@ -144,17 +144,7 @@ fn validate_tlv(value: Tlv, limits: Limits, depth: isize, count: Ref[isize]) -> 
                         error(ErrorKind::InvalidValue, 0, "invalid BIT STRING padding"),
                     )
                 }
-                let mut divisor = 1;
-                for _ in 0..value.content[0].to_isize() {
-                    divisor *= 2;
-                }
-                if (value.content.len() == 1 && divisor != 1)
-                    || (value.content.len() > 1
-                        && value.content[value.content.len() - 1].to_isize() % divisor != 0) {
-                    return Result::Err(
-                        error(ErrorKind::NonCanonical, 0, "nonzero BIT STRING padding"),
-                    )
-                }
+                validate_bit_string(value.content.slice(1, value.content.len()), value.content[0])?;
             },
             5 => if value.content.len() != 0 {
                 return Result::Err(error(ErrorKind::InvalidValue, 0, "NULL must be empty"))
