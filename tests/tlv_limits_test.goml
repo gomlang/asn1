@@ -1,0 +1,73 @@
+package tests;
+
+use ecosystem::asn1;
+use std::testing;
+
+#[test]
+fn single_tlv_framing_requires_one_available_element() -> () {
+    let input = Vec::from_array([5.to_u8(), 0]);
+    let limits = asn1::Limits { max_elements: 0, ..asn1::Limits::standard() };
+    testing::assert_eq(
+        testing::expect_err(asn1::parse_tlv(input.as_slice(), limits), "parse zero elements").kind,
+        asn1::ErrorKind::Limit,
+    );
+    testing::assert_eq(
+        testing::expect_err(asn1::encode_tlv(5, b"".as_slice(), limits), "encode zero elements").kind,
+        asn1::ErrorKind::Limit,
+    );
+    testing::assert_eq(
+        testing::expect_err(asn1::split_tlvs(input.as_slice(), limits), "split zero elements").kind,
+        asn1::ErrorKind::Limit,
+    );
+    testing::assert_eq(
+        testing::expect_ok(asn1::split_tlvs(b"".as_slice(), limits), "empty framing").len(),
+        0,
+    );
+}
+
+#[test]
+fn raw_tlv_limits_count_outer_frames_without_validating_opaque_content() -> () {
+    let content = Vec::from_array([5.to_u8(), 0, 2, 1, 1]);
+    let limits = asn1::Limits { max_depth: 0, max_elements: 1, ..asn1::Limits::standard() };
+    let wire = testing::expect_ok(asn1::encode_tlv(48, content.as_slice(), limits), "opaque frame");
+    let parsed = testing::expect_ok(asn1::parse_tlv(wire.as_slice(), limits), "outer frame");
+    testing::assert_eq(parsed.tag, 48.to_u8());
+    testing::assert(parsed.content == content);
+    let frames = testing::expect_ok(asn1::split_tlvs(wire.as_slice(), limits), "one outer frame");
+    testing::assert_eq(frames.len(), 1);
+    testing::assert_err(asn1::split_tlvs(content.as_slice(), limits));
+    testing::assert_err(asn1::validate_der(wire.as_slice(), limits));
+}
+
+#[test]
+fn raw_tlv_byte_limits_include_short_and_long_length_headers() -> () {
+    for length in Vec::from_array([0, 1, 127, 128, 255, 256]) {
+        let content: Vec[u8] = Vec::new();
+        for _ in 0..length {
+            content.push(0);
+        }
+        let header = if length < 128 {
+            2
+        } else if length < 256 {
+            3
+        } else {
+            4
+        };
+        let limits = asn1::Limits { max_bytes: length + header, ..asn1::Limits::standard() };
+        let wire = testing::expect_ok(
+            asn1::encode_tlv(128, content.as_slice(), limits),
+            "exact bytes",
+        );
+        testing::assert_eq(wire.len(), length + header);
+        testing::assert_ok(asn1::parse_tlv(wire.as_slice(), limits));
+        let short = asn1::Limits { max_bytes: limits.max_bytes - 1, ..limits };
+        testing::assert_eq(
+            testing::expect_err(asn1::encode_tlv(128, content.as_slice(), short), "short encode").kind,
+            asn1::ErrorKind::Limit,
+        );
+        testing::assert_eq(
+            testing::expect_err(asn1::parse_tlv(wire.as_slice(), short), "short parse").kind,
+            asn1::ErrorKind::Limit,
+        );
+    }
+}

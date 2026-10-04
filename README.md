@@ -33,7 +33,15 @@ For explicit ASN.1 structures that contain additional tags, `Tlv`, `parse_tlv`, 
 SET OF ordering to universal tag 17. General ASN.1 SET components use a different
 schema-dependent tag order; this generic check is not sufficient to establish
 canonical DER for arbitrary SET schemas.
-It also checks minimal nonempty ENUMERATED integer contents and the repertoires
+
+Raw framing counts each outer TLV against `max_elements`: parsing or encoding
+one requires a budget of at least one, while splitting empty input requires none.
+Constructed contents remain opaque to these framing APIs; use `validate_der`
+for recursive depth, element and content validation. `encode_tlv` rejects
+obviously oversized content before copying it, and the byte budget includes
+the tag and complete DER length header.
+
+`validate_der` also checks minimal nonempty ENUMERATED integer contents and the repertoires
 of NumericString (digits and space), PrintableString (ASN.1 letters, digits and
 its restricted punctuation), IA5String (7-bit bytes), and VisibleString (ASCII
 space through tilde). These checks apply recursively inside constructed values;

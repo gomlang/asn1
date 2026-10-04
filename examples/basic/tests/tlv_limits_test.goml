@@ -1,0 +1,15 @@
+package tests;
+
+use ecosystem::asn1;
+use std::testing;
+
+#[test]
+fn downstream_raw_tlv_obeys_zero_element_budget() -> () {
+    let input = Vec::from_array([5.to_u8(), 0]);
+    let none = asn1::Limits { max_elements: 0, ..asn1::Limits::standard() };
+    testing::assert_err(asn1::parse_tlv(input.as_slice(), none));
+    testing::assert_err(asn1::encode_tlv(5, b"".as_slice(), none));
+    let one = asn1::Limits { max_elements: 1, ..none };
+    testing::assert_ok(asn1::parse_tlv(input.as_slice(), one));
+    testing::assert_ok(asn1::encode_tlv(5, b"".as_slice(), one));
+}

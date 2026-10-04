@@ -10,6 +10,10 @@ pub struct Tlv {
 impl Reader {
     fn tlv(self: Reader, end: isize) -> Result[Tlv, Error] {
         let offset = self.cursor.get();
+        if self.elements.get() >= self.limits.max_elements {
+            return Result::Err(error(ErrorKind::Limit, offset, "DER element limit exceeded"))
+        }
+        self.elements.set(self.elements.get() + 1);
         let tag = self.byte(end)?;
         if tag == 0 || tag % 32 == 31 {
             return Result::Err(error(ErrorKind::InvalidTag, offset, "unsupported DER tag form"))
@@ -41,11 +45,6 @@ pub fn split_tlvs(input: Slice[u8], limits: Limits) -> Result[Vec[Tlv], Error] {
     let reader = Reader { input, cursor: Ref::new(0), elements: Ref::new(0), limits };
     let values: Vec[Tlv] = Vec::new();
     while reader.cursor.get() < input.len() {
-        if values.len() >= limits.max_elements {
-            return Result::Err(
-                error(ErrorKind::Limit, reader.cursor.get(), "DER element limit exceeded"),
-            )
-        }
         values.push(reader.tlv(input.len())?);
     }
     Result::Ok(values)
@@ -55,6 +54,9 @@ pub fn encode_tlv(tag: u8, content: Slice[u8], limits: Limits) -> Result[Vec[u8]
     limits.validate()?;
     if tag == 0 || tag % 32 == 31 {
         return Result::Err(error(ErrorKind::InvalidTag, 0, "unsupported DER tag form"))
+    }
+    if limits.max_elements < 1 || limits.max_bytes < 2 || content.len() > limits.max_bytes - 2 {
+        return Result::Err(error(ErrorKind::Limit, 0, "TLV exceeds DER limits"))
     }
     wrap(tag, content.to_vec(), limits)
 }
