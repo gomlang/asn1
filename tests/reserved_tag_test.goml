@@ -1,0 +1,73 @@
+package tests;
+
+use ecosystem::asn1;
+use std::testing;
+
+#[test]
+fn raw_der_parsing_rejects_constructed_universal_zero() -> () {
+    for wire in Vec::from_array(
+        [Vec::from_array([32.to_u8(), 0]), Vec::from_array([32.to_u8(), 2, 5, 0])],
+    ) {
+        testing::assert_eq(
+            testing::expect_err(
+                asn1::parse_tlv(wire.as_slice(), asn1::Limits::standard()),
+                "reserved tag",
+            ).kind,
+            asn1::ErrorKind::InvalidTag,
+        );
+        testing::assert_eq(
+            testing::expect_err(
+                asn1::split_tlvs(wire.as_slice(), asn1::Limits::standard()),
+                "reserved list tag",
+            ).kind,
+            asn1::ErrorKind::InvalidTag,
+        );
+    }
+}
+
+#[test]
+fn raw_der_encoding_rejects_both_forms_of_universal_zero() -> () {
+    for tag in Vec::from_array([0.to_u8(), 32]) {
+        for content in Vec::from_array([Vec::new(), Vec::from_array([5.to_u8(), 0])]) {
+            testing::assert_eq(
+                testing::expect_err(
+                    asn1::encode_tlv(tag, content.as_slice(), asn1::Limits::standard()),
+                    "reserved tag",
+                ).kind,
+                asn1::ErrorKind::InvalidTag,
+            );
+        }
+    }
+}
+
+#[test]
+fn nested_der_validation_rejects_constructed_universal_zero() -> () {
+    testing::assert_eq(
+        testing::expect_err(
+            asn1::validate_der(
+                Vec::from_array([48.to_u8(), 2, 32, 0]).as_slice(),
+                asn1::Limits::standard(),
+            ),
+            "reserved child tag",
+        ).kind,
+        asn1::ErrorKind::InvalidTag,
+    );
+}
+
+#[test]
+fn tag_zero_remains_valid_in_nonuniversal_classes() -> () {
+    for tag in Vec::from_array([64.to_u8(), 96, 128, 160, 192, 224]) {
+        let wire = testing::expect_ok(
+            asn1::encode_tlv(tag, b"".as_slice(), asn1::Limits::standard()),
+            "nonuniversal zero",
+        );
+        testing::assert_eq(
+            testing::expect_ok(
+                asn1::parse_tlv(wire.as_slice(), asn1::Limits::standard()),
+                "parse tag",
+            ).tag,
+            tag,
+        );
+        testing::assert_ok(asn1::validate_der(wire.as_slice(), asn1::Limits::standard()));
+    }
+}

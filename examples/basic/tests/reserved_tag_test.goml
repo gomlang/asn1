@@ -1,0 +1,19 @@
+package tests;
+
+use ecosystem::asn1;
+use std::testing;
+
+#[test]
+fn downstream_der_rejects_constructed_universal_zero() -> () {
+    testing::assert_eq(
+        testing::expect_err(
+            asn1::validate_der(
+                Vec::from_array([32.to_u8(), 0]).as_slice(),
+                asn1::Limits::standard(),
+            ),
+            "reserved universal tag",
+        ).kind,
+        asn1::ErrorKind::InvalidTag,
+    );
+    testing::assert_err(asn1::encode_tlv(32, b"".as_slice(), asn1::Limits::standard()));
+}

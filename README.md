@@ -61,7 +61,7 @@ validation rules, not new `Value`/`Schema` variants or certificate time policies
 See
 [ITU-T X.680](https://www.itu.int/rec/T-REC-X.680-202102-I/en) for character
 repertoires and [ITU-T X.690](https://www.itu.int/rec/T-REC-X.690-202102-I/en)
-for encoding rules. Unknown primitive tags retain their content bytes; their type-specific rules require an application schema. High-tag-number form and end-of-contents markers are rejected.
+for encoding rules. Unknown primitive tags retain their content bytes; their type-specific rules require an application schema. High-tag-number form and universal tag zero are rejected, including both primitive (`0x00`) and constructed (`0x20`) forms. Universal zero is reserved for encoding rules and is not a DER value; tag zero remains available in the application, context-specific and private classes.
 
 `Limits::standard()` allows at most 1 MiB of input or output, 32 nested sequence levels, 10,000 elements, and 64 OID arcs. Callers may supply stricter limits. All four limits are enforced during decoding and encoding. OID subidentifiers that do not fit `u64` and INTEGERs that do not fit `i64` return errors. Encoded output is canonical for the supported subset.
 
