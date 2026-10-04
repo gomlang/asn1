@@ -26,5 +26,6 @@ pub fn decode_integer_bytes(input: Slice[u8], limits: Limits) -> Result[Vec[u8],
     }
     validate_tlv(value, limits, 0, Ref::new(0))?;
     validate_integer_bytes(value.content.as_slice())?;
-    Result::Ok(value.content.copy())
+    // parse_tlv already gives this call independently owned content.
+    Result::Ok(value.content)
 }
