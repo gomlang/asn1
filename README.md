@@ -34,6 +34,13 @@ SET OF ordering to universal tag 17. General ASN.1 SET components use a differen
 schema-dependent tag order; this generic check is not sufficient to establish
 canonical DER for arbitrary SET schemas.
 
+Universal tags must use their required primitive or constructed form, including
+types outside `Value`/`Schema`: REAL, RELATIVE-OID, TIME, ObjectDescriptor and
+restricted character strings require primitive DER encodings; EXTERNAL,
+EMBEDDED PDV and unrestricted CHARACTER STRING require constructed encodings.
+Their additional type-specific content rules still require an application
+schema. Application, context-specific and private tags retain either form.
+
 Raw framing counts each outer TLV against `max_elements`: parsing or encoding
 one requires a budget of at least one, while splitting empty input requires none.
 Constructed contents remain opaque to these framing APIs; use `validate_der`

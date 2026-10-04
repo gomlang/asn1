@@ -1,0 +1,27 @@
+package tests;
+
+use ecosystem::asn1;
+use std::testing;
+
+#[test]
+fn downstream_der_validator_checks_universal_tag_forms_beyond_typed_values() -> () {
+    for wire in Vec::from_array(
+        [
+            Vec::from_array([41.to_u8(), 0]),
+            Vec::from_array([48.to_u8(), 2, 45, 0]),
+            Vec::from_array([29.to_u8(), 0]),
+        ],
+    ) {
+        testing::assert_ok(asn1::parse_tlv(wire.as_slice(), asn1::Limits::standard()));
+        testing::assert_eq(
+            testing::expect_err(
+                asn1::validate_der(wire.as_slice(), asn1::Limits::standard()),
+                "universal tag form",
+            ).kind,
+            asn1::ErrorKind::InvalidTag,
+        );
+    }
+    testing::assert_ok(
+        asn1::validate_der(Vec::from_array([9.to_u8(), 0]).as_slice(), asn1::Limits::standard()),
+    );
+}

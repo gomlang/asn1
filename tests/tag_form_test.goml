@@ -1,0 +1,81 @@
+package tests;
+
+use ecosystem::asn1;
+use std::testing;
+
+fn framed(tag: u8, content: Vec[u8]) -> Vec[u8] {
+    testing::expect_ok(
+        asn1::encode_tlv(tag, content.as_slice(), asn1::Limits::standard()),
+        "raw TLV",
+    )
+}
+
+fn invalid_form(wire: Vec[u8]) -> () {
+    testing::assert_ok(asn1::parse_tlv(wire.as_slice(), asn1::Limits::standard()));
+    for input in Vec::from_array([wire, framed(48, wire), framed(160, wire)]) {
+        testing::assert_eq(
+            testing::expect_err(
+                asn1::validate_der(input.as_slice(), asn1::Limits::standard()),
+                "invalid universal tag form",
+            ).kind,
+            asn1::ErrorKind::InvalidTag,
+        );
+    }
+}
+
+#[test]
+fn der_rejects_constructed_forms_of_additional_primitive_universal_types() -> () {
+    // X.690 8.5.1, 8.20.1, 8.23, 8.25, 8.26.1.1 and 10.2.
+    for number in Vec::from_array([7.to_u8(), 9, 13, 14, 21, 25]) {
+        invalid_form(framed(number + 32, Vec::new()));
+        invalid_form(framed(number + 32, Vec::from_array([5, 0])));
+    }
+}
+
+#[test]
+fn der_rejects_primitive_external_embedded_pdv_and_character_string() -> () {
+    // X.690 8.17, 8.18 and 8.24 use associated SEQUENCE encodings.
+    for number in Vec::from_array([8.to_u8(), 11, 29]) {
+        invalid_form(framed(number, Vec::new()));
+        invalid_form(framed(number, Vec::from_array([5, 0])));
+    }
+}
+
+#[test]
+fn der_form_checks_preserve_opaque_primitive_contents_and_other_tag_classes() -> () {
+    for (tag, content) in Vec::from_array(
+        [
+            (7.to_u8(), b"descriptor"),
+            (9.to_u8(), Vec::new()),
+            (13.to_u8(), Vec::from_array([1.to_u8()])),
+            (14.to_u8(), b"2026-10-05"),
+            (21.to_u8(), Vec::new()),
+            (25.to_u8(), b"graphic"),
+        ],
+    ) {
+        testing::assert_ok(
+            asn1::validate_der(framed(tag, content).as_slice(), asn1::Limits::standard()),
+        );
+    }
+    for wire in Vec::from_array(
+        [
+            framed(40, Vec::from_array([129, 0])),
+            framed(43, Vec::from_array([160, 2, 133, 0, 130, 0])),
+            framed(61, Vec::from_array([160, 2, 133, 0, 130, 0])),
+        ],
+    ) {
+        testing::assert_ok(asn1::validate_der(wire.as_slice(), asn1::Limits::standard()));
+    }
+    for class in Vec::from_array([64.to_u8(), 128, 192]) {
+        for number in Vec::from_array([7.to_u8(), 8, 9, 11, 13, 14, 21, 25, 29]) {
+            for form in Vec::from_array([0.to_u8(), 32]) {
+                testing::assert_ok(
+                    asn1::validate_der(
+                        framed(class + form + number, Vec::new()).as_slice(),
+                        asn1::Limits::standard(),
+                    ),
+                );
+            }
+        }
+    }
+}
