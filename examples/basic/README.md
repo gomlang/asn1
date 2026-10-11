@@ -4,4 +4,4 @@ This example uses `ecosystem::asn1` from the library root. Its test encodes and 
 
 Run `(cd ../verification && just ecosystem-test asn1)` from the library root.
 
-This example shares the library root manifest and its dependencies. From the library root, run `goml verify --example basic` to build and test it as an independent downstream module.
+This example shares the library root manifest and its dependencies. From the library root, run `goml test` to build and test the library and its examples.

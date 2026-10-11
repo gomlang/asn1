@@ -76,15 +76,15 @@ Run `(cd ../verification && just ecosystem-test asn1)` from this library reposit
 
 ## Development and examples
 
-Requires GoML 0.1.56 or newer. The `examples/basic/` example shares the root manifest and its dependencies. From the library root, run:
+Requires the [current GoML toolchain](https://github.com/gomlang/verification/blob/main/ci/toolchain.json) with unversioned registry support. The `examples/basic/` example shares the root manifest and its dependencies. From the library root, run:
 
 ```sh
 goml run --example basic
 goml test
-goml verify --timeout 300s
+(cd ../verification && just ecosystem-test asn1)
 ```
 
-`goml test` builds the example and runs its tests. `goml verify` repeats the example checks as an independent module against an isolated registry snapshot. `(cd ../verification && just ecosystem-test asn1)` also retains the library-specific smoke and compatibility checks.
+`goml test` builds the example and runs its tests. `(cd ../verification && just ecosystem-test asn1)` runs the library-specific smoke and compatibility checks.
 
 ### Arbitrary-width INTEGER bytes
 
