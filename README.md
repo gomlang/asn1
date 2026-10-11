@@ -72,19 +72,19 @@ for encoding rules. Unknown primitive tags retain their content bytes; their typ
 
 `Limits::standard()` allows at most 1 MiB of input or output, 32 nested sequence levels, 10,000 elements, and 64 OID arcs. Callers may supply stricter limits. All four limits are enforced during decoding and encoding. OID subidentifiers that do not fit `u64` and INTEGERs that do not fit `i64` return errors. Encoded output is canonical for the supported subset.
 
-Run `(cd ../verification && just ecosystem-test asn1)` from this library repository to test the library, example, downstream verification, and cached build.
+Run `(cd ../workflows && just ecosystem-test asn1)` from this library repository to test the library, example, downstream verification, and cached build.
 
 ## Development and examples
 
-Requires the [current GoML toolchain](https://github.com/gomlang/verification/blob/main/ci/toolchain.json) with unversioned registry support. The `examples/basic/` example shares the root manifest and its dependencies. From the library root, run:
+Requires the [current GoML toolchain](https://github.com/gomlang/workflows/blob/main/ci/toolchain.json) with unversioned registry support. The `examples/basic/` example shares the root manifest and its dependencies. From the library root, run:
 
 ```sh
 goml run --example basic
 goml test
-(cd ../verification && just ecosystem-test asn1)
+(cd ../workflows && just ecosystem-test asn1)
 ```
 
-`goml test` builds the example and runs its tests. `(cd ../verification && just ecosystem-test asn1)` runs the library-specific smoke and compatibility checks.
+`goml test` builds the example and runs its tests. `(cd ../workflows && just ecosystem-test asn1)` runs the library-specific smoke and compatibility checks.
 
 ### Arbitrary-width INTEGER bytes
 
